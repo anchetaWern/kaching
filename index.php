@@ -52,11 +52,37 @@ Flight::route('POST /login', function(){
 });
 
 Flight::route('POST /get_bookmarks', function(){
-	
+
+	$request_body = @file_get_contents('php://input');
+	$input = json_decode($request_body, true);
+
 	if(!empty($_SESSION['user'])){
 
-		$bookmarks = $_SESSION['user']['bookmarks'];
-		echo json_encode($bookmarks);
+		if(empty($input['refresh'])){		
+			$bookmarks = $_SESSION['user']['bookmarks'];
+			echo json_encode($bookmarks);
+		}else{
+
+			$user = $_SESSION['user'];
+			$username = $user['username'];
+			$password = $user['password'];
+
+			$delicious = new Delicious($username, $password);
+			$results = $delicious->get_all();
+			
+			$bookmarks = array();
+			$bookmarks_obj = $results->post;
+			foreach($bookmarks_obj as $b){
+				$text = json_decode(json_encode($b['description']), true);
+				$url = json_decode(json_encode($b['href']), true); 
+
+
+				$bookmarks[] = array('text' => $text[0], 'url' => $url[0]);
+			}
+
+			$_SESSION['user']['bookmarks'] = $bookmarks;
+			echo json_encode($bookmarks);
+		}
 
 	}else{
 		echo 'error';
@@ -110,7 +136,6 @@ Flight::route('POST /download_bookmark', function(){
 		$images = $xpath->query('//img/@src');
 		$scripts = $xpath->query('//script/@src');
 		$styles = $xpath->query('//link/@href');
-		$inline_styles = $xpath->query('//style');
 
 		$old_styles = array();
 		$new_styles = array();
@@ -131,8 +156,11 @@ Flight::route('POST /download_bookmark', function(){
 		foreach($scripts as $script){
 
 			$src = $script->value;
-			$len = strlen($src);
 			$filename = substr($src, strrpos($src, '/') + 1);
+			$script_version_start_index = strpos($filename, '?');
+			if($script_version_start_index){
+				$filename = substr($filename, 0, $script_version_start_index);
+			}
 
 			$script_source = $src;
 			if(substr($src, 0, 4) != 'http'  && substr($src, 0, 2) != '//'){
@@ -145,9 +173,9 @@ Flight::route('POST /download_bookmark', function(){
 			$script_contents = @file_get_contents($script_source);
 
 			if(!empty($script_contents)){		
-				$script_type = substr($src, $len - 2, 2);
-				if(strtolower($script_type) == 'js'){
 
+				$script_position = strpos($filename, '.js');
+				if(!empty($script_position)){				
 					$new_script = $location . '/scripts/' . $filename;
 
 					$handle = fopen($new_script, 'w');
@@ -156,7 +184,8 @@ Flight::route('POST /download_bookmark', function(){
 					
 					$old_scripts[] = $src;
 					$new_scripts[] = 'scripts/' . $filename;
-				}			 
+				}
+							 
 			}
 		}
 
@@ -166,33 +195,38 @@ Flight::route('POST /download_bookmark', function(){
 		foreach($styles as $style){
 
 			$src = $style->value;
-			$len = strlen($src);
 			$filename = substr($src, strrpos($src, '/') + 1);
+			$style_version_start_index = strpos($filename, '?');
+			if($style_version_start_index){
+				$filename = substr($filename, 0, $style_version_start_index);
+			}
 
 			$style_source = $src;
 			if(substr($src, 0, 4) != 'http'){
 				$style_source = $scheme . $host . $src;
 			}
 
-			$style_contents = file_get_contents($style_source);
+			$style_contents = @file_get_contents($style_source);
 
-			$link_type = substr($src, $len - 3, 3);
-			if(strtolower($link_type) == 'css'){
+			if(!empty($style_contents)){
+				$style_position = strpos($filename, '.css');
+				if(!empty($style_position)){				
+					$new_style = $location . '/styles/' . $filename;
 
-				$new_style = $location . '/styles/' . $filename;
+					$handle = fopen($new_style, 'w');
+					fclose($handle);
+					file_put_contents($new_style, $style_contents);
+					
+					$style_sources[] = $new_style;
 
-				$handle = fopen($new_style, 'w');
-				fclose($handle);
-				file_put_contents($new_style, $style_contents);
+					$old_styles[] = $src;
+					$new_styles[] = 'styles/' . $filename;
+				}
+			}
 				
-				$style_sources[] = $new_style;
-
-				$old_styles[] = $src;
-				$new_styles[] = 'styles/' . $filename;
-			}	
 		}
 
-
+		
 		//get background images from css
 		foreach($new_styles as $ns){
 
@@ -200,18 +234,22 @@ Flight::route('POST /download_bookmark', function(){
 			$new_style_images = array();
 
 			$stylesheet_location = $location . '/' . $ns;
-			$stylesheet_contents = file_get_contents($stylesheet_location);
+			$stylesheet_contents = @file_get_contents($stylesheet_location);
 
+	
 			preg_match_all('/url\(\'(?:\/|\w|\.|\?|\:)*\'\)/', $stylesheet_contents, $stylesheet_matches);
 
 			$stylesheet_images = $stylesheet_matches[0];
 			foreach($stylesheet_images as $img){
 				$s_img = str_replace(array("'", "url(", ")"), '', $img);
-				$len = strlen($s_img);
-				$filename = substr($s_img, strrpos($s_img, '/') + 1);
+				$filename = substr($s_img, strrpos($s_img, '/'));
 
 				$end_pos = strpos($filename, '?');
-				$filename = substr($filename, 0, $end_pos);
+				if(!empty($end_pos)){
+					$filename = substr($filename, 0, $end_pos);
+				}
+
+				
 
 				$style_image_source = $s_img;
 				if($s_img[0] == '/'){
@@ -246,30 +284,32 @@ Flight::route('POST /download_bookmark', function(){
 
 			$image_source = $src;
 
-			if(substr($src, 0, 4) != 'http'){
+			if(!in_array(substr($src, 0, 4), array('http', 'https'))){
 				$image_source = $scheme . $host . $src;
 			}
 			
-			$image_contents = file_get_contents($image_source);
+			$image_contents = @file_get_contents($image_source);
 
-			$image_type = substr($src, $len - 3, 3);
-			if(in_array(strtolower($image_type), $image_types)){
+			if(!empty($image_contents)){			
+				$image_type = substr($src, $len - 3, 3);
+				if(in_array(strtolower($image_type), $image_types)){
 
-				$new_image = $location . '/images/' . $filename;
+					$new_image = $location . '/images/' . $filename;
 
-				$handle = fopen($new_image, 'w');
-				fclose($handle);
-				file_put_contents($new_image, $image_contents);
-				
-				$old_images[] = $src;
-				$new_images[] = 'images/' . $filename;
-			}		
+					$handle = fopen($new_image, 'w');
+					fclose($handle);
+					file_put_contents($new_image, $image_contents);
+					
+					$old_images[] = $src;
+					$new_images[] = 'images/' . $filename;
+				}		
+			}
 		}	
 		
 		$new_contents = str_replace($old_styles, $new_styles, $contents);
 		$new_contents = str_replace($old_images, $new_images, $new_contents);
 		$new_contents = str_replace($old_scripts, $new_scripts, $new_contents);
-		$new_contents = str_replace('<html>', '<html manifest="page.appcache">', $new_contents);
+		$new_contents = str_replace('<html', '<html manifest="page.appcache"', $new_contents);
 
 		$new_index = $location . '/index.html';
 		$handle = fopen($new_index, 'w');
@@ -303,6 +343,9 @@ Flight::route('POST /download_bookmark', function(){
 		$handle = fopen($appcache, 'w');
 		fclose($handle);
 		file_put_contents($appcache, $appcache_contents);
+
+		$data = array('local_url' => $location);
+		echo json_encode($data);
 	}
 
 });
@@ -329,59 +372,145 @@ Flight::route('POST /delete_bookmark', function(){
 	
 });
 
+
+
 Flight::route('/test', function(){
+		$bookmark_url = 'https://gist.github.com/dypsilon/5819504';
 
-	
+		$user_folder = 'wernancheta';
+		$temp_files = './temp_files';
+		$main_dir = md5($bookmark_url);
+		$user_dir = $temp_files . '/' . $user_folder;
+		$location = $temp_files . '/' . $user_folder . '/' . $main_dir;
 
+		if(!file_exists($user_dir)){
+			mkdir($user_dir);
+		}
+
+		if(!file_exists($location)){
+			mkdir($location);
+		}
+
+		mkdir($location . '/scripts');
 	
+		
+		$contents = file_get_contents($bookmark_url);
+
+		$doc = new DOMDocument();
+		libxml_use_internal_errors(true);
+		$doc->loadHTML($contents);
+		libxml_clear_errors(); //remove errors for yucky html
+		$xpath = new DOMXPath($doc);
+
+		$scripts = $xpath->query('//script/@src');
+		
+		$old_scripts = array();
+		$new_scripts = array();
+
+		$z = array();
+		//get external scripts
+		foreach($scripts as $script){
+
+			$src = $script->value;
+			$filename = substr($src, strrpos($src, '/') + 1);
+			$script_version_start_index = strpos($filename, '?');
+			$filename = substr($filename, 0, $script_version_start_index);
+
+			$script_source = $src;
+			if(substr($src, 0, 4) != 'http'  && substr($src, 0, 2) != '//'){
+				$script_source = $scheme . $host . $src;
+			}else if(substr($src, 0, 2) == '//'){
+				$script_source = $scheme . str_replace('//', '', $src);
+			}
+			
+			$z[] = $script_source;
+			$script_contents = @file_get_contents($script_source);
+
+			if(!empty($script_contents)){		
+
+				$script_position = strpos($filename, '.js');
+				if(!empty($script_position)){				
+					$new_script = $location . '/scripts/' . $filename;
+
+					$handle = fopen($new_script, 'w');
+					fclose($handle);
+					file_put_contents($new_script, $script_contents);
+					
+					
+
+					$old_scripts[] = $src;
+					$new_scripts[] = 'scripts/' . $filename;
+				}
+							 
+			}
+		}
+
+		echo "<pre>";
+		print_r($z);
+		echo "</pre>";
 });
 
+Flight::route('/vest', function(){
 
-Flight::route('/test2', function(){
-	$location = 'temp_files/afe0549d7bac7dfc385180fbc2c5f505';
-	$url = 'http://anchetawern.github.io/stylesheets/screen.css';
-
-	$url_parts = parse_url($url);
+	$test = array();
+	$bookmark_url = 'https://gist.github.com/dypsilon/5819504';
+	$url_parts = parse_url($bookmark_url);
 	$scheme = $url_parts['scheme'] . '://';
 	$host = $url_parts['host'];
 
-	$contents = file_get_contents($url);
-	
-	$old_style_images = array();
-	$new_style_images = array();
+	$user_folder = 'wernancheta';
+	$temp_files = './temp_files';
+	$main_dir = 'drake';
+	$user_dir = $temp_files . '/' . $user_folder;
+	$location = $temp_files . '/' . $user_folder . '/' . $main_dir;
 
-	preg_match_all('/url\(\'(?:\/|\w|\.|\?|\:)*\'\)/', $contents, $matches);
-	$stylesheet_images = $matches[0];
-	foreach($stylesheet_images as $img){
-		$s_img = str_replace(array("'", "url(", ")"), '', $img);
-		$len = strlen($s_img);
-		$filename = substr($s_img, strrpos($s_img, '/') + 1);
 
-		$end_pos = strpos($filename, '?');
-		$filename = substr($filename, 0, $end_pos);
-
-		$style_image_source = $s_img;
-		if($s_img[0] == '/'){
-			$style_image_source = $scheme . $host . $s_img; 
+		if(!file_exists($location)){
+			mkdir($location);
 		}
-		$style_image_contents = @file_get_contents($style_image_source);
 
-		$old_style_images[] = $s_img;
-		$new_style_images[] = '../images/' . $filename;
+		mkdir($location . '/scripts');
+		mkdir($location . '/styles');
+		mkdir($location . '/images');
 
-		$new_image = $location . '/images/' . $filename;
+	$src = 'https://gist.github.com/assets/application-7d8a13b069fc44ac7cae88ab43791eeb.js';
 
-		$handle = fopen($filename, 'w');
-		fclose($handle);
-		file_put_contents($new_image, $style_image_contents);	
+	$filename = substr($src, strrpos($src, '/') + 1);
+	$script_version_start_index = strpos($filename, '?');
+	if($script_version_start_index){
+		$filename = substr($filename, 0, $script_version_start_index);
 	}
 
-	$new_contents = str_replace($old_style_images, $new_style_images, $contents);
-	file_put_contents($location . '/styles/screen.css', $new_contents);
+	$script_source = $src;
+	if(substr($src, 0, 4) != 'http'  && substr($src, 0, 2) != '//'){
+		$script_source = $scheme . $host . $src;
+	}else if(substr($src, 0, 2) == '//'){
+		$script_source = $scheme . str_replace('//', '', $src);
+	}
+	
+	$test[] = $filename;
+	$script_contents = @file_get_contents($script_source);
+
+	if(!empty($script_contents)){		
+		
+		$script_position = strpos($filename, '.js');
+		if(!empty($script_position)){				
+			$new_script = $location . '/scripts/' . $filename;
+
+			$handle = fopen($new_script, 'w');
+			fclose($handle);
+			file_put_contents($new_script, $script_contents);
 			
+			$old_scripts[] = $src;
+			$new_scripts[] = 'scripts/' . $filename;
+
+			//$test[] = $new_script;
+		}
+					 
+	}
+
+	print_r($test);
 });
-
-
 
 
 Flight::start();
