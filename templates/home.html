@@ -5,6 +5,8 @@
 	<input type="text" ng-model="search" placeholder="search">
 	<input type="radio" name="action" value="delete" ng-model="act">delete
 	<input type="radio" name="action" value="download" ng-model="act">download
+	<a href="view.html" target="_blank">(View Offline)</a>
+	<a href="" ng-click="refresh_bookmarks()">(Refresh Data)</a>
 	
 	<ul>
 		<li ng-repeat="bookmark in bookmarks | filter : search | limitTo : 20">
@@ -13,3 +15,4 @@
 		</li>
 	</ul>
 </div>
+<img src="img/ajax-loader.gif" id="ajax_loader">

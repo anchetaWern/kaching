@@ -1,0 +1,10 @@
+<h2>Bookmarks</h2>
+<div>
+	<input type="text" ng-model="search" placeholder="search">
+
+	<ul>
+		<li ng-repeat="bookmark in bookmarks | filter : search | limitTo : 20">
+			<a href="{{bookmark.local_url}}" target="_blank">{{bookmark.text}}</a>
+		</li>
+	</ul>
+</div>

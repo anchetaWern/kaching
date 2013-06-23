@@ -1,0 +1,8 @@
+CACHE MANIFEST
+view.html
+templates/offline-home.html
+js/angular.min.js
+frontend/bootstrap/css/bootstrap.min.css
+js/offline-controller.js
+js/jquery.min.js
+frontend/bootstrap/js/bootstrap.min.js
