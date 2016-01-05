@@ -24,6 +24,11 @@ An app for caching webpages for offline viewing.
 - AJAX Loader when adding multiple links at the same time
 
 
+##Project Status
+
+Abandonware. I no longer have any plans on improving and maintaining this project.
+
+
 ##License
 
 The MIT License (MIT)
